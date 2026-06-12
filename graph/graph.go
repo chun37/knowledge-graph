@@ -1,4 +1,4 @@
-package main
+package graph
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ type Graph struct {
 	Edges []*Edge          `json:"edges"`
 }
 
-func NewGraph() *Graph {
+func New() *Graph {
 	return &Graph{Nodes: map[string]*Node{}, Edges: []*Edge{}}
 }
 

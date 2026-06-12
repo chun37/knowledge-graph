@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/chun37/knowledge-graph/graph"
 )
 
 const usage = `kg - a small knowledge graph CLI
@@ -73,8 +75,8 @@ func main() {
 		return
 	}
 
-	path := defaultDataPath()
-	g, err := Load(path)
+	path := graph.DefaultDataPath()
+	g, err := graph.Load(path)
 	if err != nil {
 		die("load: %v", err)
 	}
@@ -112,7 +114,7 @@ func main() {
 	}
 
 	if mutated {
-		if err := Save(path, g); err != nil {
+		if err := graph.Save(path, g); err != nil {
 			die("save: %v", err)
 		}
 	}
@@ -183,7 +185,7 @@ func parseProps(values []string) (map[string]string, error) {
 	return out, nil
 }
 
-func cmdAddNode(g *Graph, args []string) bool {
+func cmdAddNode(g *graph.Graph, args []string) bool {
 	pos, flags, err := parseFlags(args, map[string]flagKind{
 		"label": flagRepeated,
 		"prop":  flagRepeated,
@@ -207,7 +209,7 @@ func cmdAddNode(g *Graph, args []string) bool {
 	return true
 }
 
-func cmdAddEdge(g *Graph, args []string) bool {
+func cmdAddEdge(g *graph.Graph, args []string) bool {
 	pos, flags, err := parseFlags(args, map[string]flagKind{
 		"prop": flagRepeated,
 	})
@@ -229,7 +231,7 @@ func cmdAddEdge(g *Graph, args []string) bool {
 	return true
 }
 
-func cmdDeleteNode(g *Graph, args []string) bool {
+func cmdDeleteNode(g *graph.Graph, args []string) bool {
 	if len(args) != 1 {
 		die("delete-node needs <id>")
 	}
@@ -240,7 +242,7 @@ func cmdDeleteNode(g *Graph, args []string) bool {
 	return true
 }
 
-func cmdDeleteEdge(g *Graph, args []string) bool {
+func cmdDeleteEdge(g *graph.Graph, args []string) bool {
 	if len(args) != 3 {
 		die("delete-edge needs <from> <relation> <to>")
 	}
@@ -251,7 +253,7 @@ func cmdDeleteEdge(g *Graph, args []string) bool {
 	return true
 }
 
-func cmdShow(g *Graph, args []string) {
+func cmdShow(g *graph.Graph, args []string) {
 	if len(args) != 1 {
 		die("show needs <id>")
 	}
@@ -260,8 +262,8 @@ func cmdShow(g *Graph, args []string) {
 		die("no such node: %s", args[0])
 	}
 	fmt.Println(n)
-	outs := g.Neighbors(n.ID, DirOut)
-	ins := g.Neighbors(n.ID, DirIn)
+	outs := g.Neighbors(n.ID, graph.DirOut)
+	ins := g.Neighbors(n.ID, graph.DirIn)
 	if len(outs) > 0 {
 		fmt.Println("  outgoing:")
 		for _, e := range outs {
@@ -276,7 +278,7 @@ func cmdShow(g *Graph, args []string) {
 	}
 }
 
-func cmdListNodes(g *Graph, args []string) {
+func cmdListNodes(g *graph.Graph, args []string) {
 	_, flags, err := parseFlags(args, map[string]flagKind{"label": flagSingle})
 	if err != nil {
 		die("%v", err)
@@ -308,7 +310,7 @@ func cmdListNodes(g *Graph, args []string) {
 	}
 }
 
-func cmdListEdges(g *Graph, args []string) {
+func cmdListEdges(g *graph.Graph, args []string) {
 	_, flags, err := parseFlags(args, map[string]flagKind{"relation": flagSingle})
 	if err != nil {
 		die("%v", err)
@@ -325,7 +327,7 @@ func cmdListEdges(g *Graph, args []string) {
 	}
 }
 
-func cmdQuery(g *Graph, args []string) {
+func cmdQuery(g *graph.Graph, args []string) {
 	_, flags, err := parseFlags(args, map[string]flagKind{
 		"subject":   flagSingle,
 		"predicate": flagSingle,
@@ -350,7 +352,7 @@ func cmdQuery(g *Graph, args []string) {
 	}
 }
 
-func cmdNeighbors(g *Graph, args []string) {
+func cmdNeighbors(g *graph.Graph, args []string) {
 	pos, flags, err := parseFlags(args, map[string]flagKind{"direction": flagSingle})
 	if err != nil {
 		die("%v", err)
@@ -358,15 +360,15 @@ func cmdNeighbors(g *Graph, args []string) {
 	if len(pos) != 1 {
 		die("neighbors needs <id>")
 	}
-	dir := DirBoth
+	dir := graph.DirBoth
 	if v := flags["direction"]; len(v) > 0 {
 		switch v[0] {
 		case "out":
-			dir = DirOut
+			dir = graph.DirOut
 		case "in":
-			dir = DirIn
+			dir = graph.DirIn
 		case "both":
-			dir = DirBoth
+			dir = graph.DirBoth
 		default:
 			die("--direction must be one of: out, in, both")
 		}
@@ -384,7 +386,7 @@ func cmdNeighbors(g *Graph, args []string) {
 	}
 }
 
-func cmdPath(g *Graph, args []string) {
+func cmdPath(g *graph.Graph, args []string) {
 	if len(args) != 2 {
 		die("path needs <from> <to>")
 	}
@@ -396,7 +398,7 @@ func cmdPath(g *Graph, args []string) {
 	fmt.Println(strings.Join(p, " -> "))
 }
 
-func cmdExport(g *Graph, args []string) {
+func cmdExport(g *graph.Graph, args []string) {
 	_, flags, err := parseFlags(args, map[string]flagKind{"format": flagSingle})
 	if err != nil {
 		die("%v", err)

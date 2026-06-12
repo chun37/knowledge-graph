@@ -1,4 +1,4 @@
-package main
+package graph
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func defaultDataPath() string {
+func DefaultDataPath() string {
 	if p := os.Getenv("KG_DATA"); p != "" {
 		return p
 	}
@@ -23,11 +23,11 @@ func Load(path string) (*Graph, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return NewGraph(), nil
+			return New(), nil
 		}
 		return nil, err
 	}
-	g := NewGraph()
+	g := New()
 	if len(b) == 0 {
 		return g, nil
 	}
