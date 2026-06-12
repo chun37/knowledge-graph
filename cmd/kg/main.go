@@ -68,7 +68,8 @@ Storage:
   snapshot when it grows large.
 
 Environment:
-  KG_DATA   Path to the JSONL log. Default: ~/.kg/log.jsonl
+  KG_DATA   Path to the JSONL log. If unset, kg uses ./kg.jsonl when it
+            exists in the current directory, otherwise ~/.kg/log.jsonl.
 `
 
 func main() {

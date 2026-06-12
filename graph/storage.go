@@ -6,15 +6,20 @@ import (
 )
 
 // DefaultDataPath returns the JSONL log path used when KG_DATA is unset.
-// If the new log.jsonl does not yet exist but a legacy data.json does, the
-// legacy path is returned so Open can migrate it on first access.
+// Resolution order:
+//  1. ./kg.jsonl in the current working directory, if it exists
+//  2. ~/.kg/log.jsonl, or legacy ~/.kg/data.json if that is the only one present
 func DefaultDataPath() string {
 	if p := os.Getenv("KG_DATA"); p != "" {
 		return p
 	}
+	const cwdName = "kg.jsonl"
+	if _, err := os.Stat(cwdName); err == nil {
+		return cwdName
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "kg-log.jsonl"
+		return cwdName
 	}
 	newPath := filepath.Join(home, ".kg", "log.jsonl")
 	if _, err := os.Stat(newPath); err == nil {
