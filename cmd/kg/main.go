@@ -55,11 +55,20 @@ Commands:
   export [--format json|triples]
       Dump the whole graph to stdout. Default: json.
 
+  compact
+      Rewrite the JSONL log from the current state. Removes tombstones and
+      overwritten records, shrinking the file. Replay time also drops.
+
   help
       Show this help.
 
+Storage:
+  Each mutation appends one JSON object to a log file (JSONL). Reads replay
+  the log into memory. Run "kg compact" to collapse the log to a minimal
+  snapshot when it grows large.
+
 Environment:
-  KG_DATA   Path to the JSON store. Default: ~/.kg/data.json
+  KG_DATA   Path to the JSONL log. Default: ~/.kg/log.jsonl
 `
 
 func main() {
@@ -76,47 +85,42 @@ func main() {
 	}
 
 	path := graph.DefaultDataPath()
-	g, err := graph.Load(path)
+	s, err := graph.Open(path)
 	if err != nil {
-		die("load: %v", err)
+		die("open: %v", err)
 	}
 
-	mutated := false
 	switch cmd {
 	case "add-node":
-		mutated = cmdAddNode(g, args)
+		cmdAddNode(s, args)
 	case "add-edge", "add-triple":
-		mutated = cmdAddEdge(g, args)
+		cmdAddEdge(s, args)
 	case "delete-node":
-		mutated = cmdDeleteNode(g, args)
+		cmdDeleteNode(s, args)
 	case "delete-edge":
-		mutated = cmdDeleteEdge(g, args)
+		cmdDeleteEdge(s, args)
 	case "show":
-		cmdShow(g, args)
+		cmdShow(s.G, args)
 	case "list-nodes":
-		cmdListNodes(g, args)
+		cmdListNodes(s.G, args)
 	case "list-edges":
-		cmdListEdges(g, args)
+		cmdListEdges(s.G, args)
 	case "query":
-		cmdQuery(g, args)
+		cmdQuery(s.G, args)
 	case "neighbors":
-		cmdNeighbors(g, args)
+		cmdNeighbors(s.G, args)
 	case "path":
-		cmdPath(g, args)
+		cmdPath(s.G, args)
 	case "stats":
-		fmt.Println(g.Stats())
+		fmt.Println(s.G.Stats())
 	case "export":
-		cmdExport(g, args)
+		cmdExport(s.G, args)
+	case "compact":
+		cmdCompact(s, args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", cmd)
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
-	}
-
-	if mutated {
-		if err := graph.Save(path, g); err != nil {
-			die("save: %v", err)
-		}
 	}
 }
 
@@ -185,7 +189,7 @@ func parseProps(values []string) (map[string]string, error) {
 	return out, nil
 }
 
-func cmdAddNode(g *graph.Graph, args []string) bool {
+func cmdAddNode(s *graph.Store, args []string) {
 	pos, flags, err := parseFlags(args, map[string]flagKind{
 		"label": flagRepeated,
 		"prop":  flagRepeated,
@@ -200,16 +204,18 @@ func cmdAddNode(g *graph.Graph, args []string) bool {
 	if err != nil {
 		die("%v", err)
 	}
-	n, created := g.AddNode(pos[0], flags["label"], props)
+	n, created, err := s.AddNode(pos[0], flags["label"], props)
+	if err != nil {
+		die("write log: %v", err)
+	}
 	verb := "updated"
 	if created {
 		verb = "added"
 	}
 	fmt.Printf("%s: %s\n", verb, n)
-	return true
 }
 
-func cmdAddEdge(g *graph.Graph, args []string) bool {
+func cmdAddEdge(s *graph.Store, args []string) {
 	pos, flags, err := parseFlags(args, map[string]flagKind{
 		"prop": flagRepeated,
 	})
@@ -223,34 +229,39 @@ func cmdAddEdge(g *graph.Graph, args []string) bool {
 	if err != nil {
 		die("%v", err)
 	}
-	e, err := g.AddEdge(pos[0], pos[1], pos[2], props)
+	e, err := s.AddEdge(pos[0], pos[1], pos[2], props)
 	if err != nil {
 		die("%v", err)
 	}
 	fmt.Printf("added: %s\n", e)
-	return true
 }
 
-func cmdDeleteNode(g *graph.Graph, args []string) bool {
+func cmdDeleteNode(s *graph.Store, args []string) {
 	if len(args) != 1 {
 		die("delete-node needs <id>")
 	}
-	if !g.DeleteNode(args[0]) {
+	ok, err := s.DeleteNode(args[0])
+	if err != nil {
+		die("write log: %v", err)
+	}
+	if !ok {
 		die("no such node: %s", args[0])
 	}
 	fmt.Printf("deleted node: %s\n", args[0])
-	return true
 }
 
-func cmdDeleteEdge(g *graph.Graph, args []string) bool {
+func cmdDeleteEdge(s *graph.Store, args []string) {
 	if len(args) != 3 {
 		die("delete-edge needs <from> <relation> <to>")
 	}
-	if !g.DeleteEdge(args[0], args[1], args[2]) {
+	ok, err := s.DeleteEdge(args[0], args[1], args[2])
+	if err != nil {
+		die("write log: %v", err)
+	}
+	if !ok {
 		die("no such edge")
 	}
 	fmt.Printf("deleted edge: (%s) -[%s]-> (%s)\n", args[0], args[1], args[2])
-	return true
 }
 
 func cmdShow(g *graph.Graph, args []string) {
@@ -420,5 +431,21 @@ func cmdExport(g *graph.Graph, args []string) {
 		}
 	default:
 		die("unknown format: %s (want json or triples)", format)
+	}
+}
+
+func cmdCompact(s *graph.Store, args []string) {
+	if len(args) != 0 {
+		die("compact takes no arguments")
+	}
+	oldSize, newSize, err := s.Compact()
+	if err != nil {
+		die("compact: %v", err)
+	}
+	if oldSize > 0 {
+		ratio := 100.0 * float64(newSize) / float64(oldSize)
+		fmt.Printf("compacted: %d -> %d bytes (%.1f%% of original)\n", oldSize, newSize, ratio)
+	} else {
+		fmt.Printf("compacted: %d bytes (no prior file)\n", newSize)
 	}
 }

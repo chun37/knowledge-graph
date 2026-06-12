@@ -37,7 +37,8 @@ go build -o kg ./cmd/kg
 ├── cmd/kg/main.go      CLI エントリポイント
 ├── graph/
 │   ├── graph.go        Graph / Node / Edge と操作
-│   └── storage.go      JSON 永続化
+│   ├── log.go          Op / Store（JSONL append-only ログ）
+│   └── storage.go      DefaultDataPath とレガシー検出
 └── go.mod
 ```
 
@@ -46,20 +47,57 @@ go build -o kg ./cmd/kg
 ```go
 import "github.com/chun37/knowledge-graph/graph"
 
+// In-memory only:
 g := graph.New()
 g.AddNode("Alice", []string{"Person"}, map[string]string{"age": "30"})
 g.AddEdge("Alice", "knows", "Bob", nil)
+
+// With JSONL persistence:
+s, _ := graph.Open("/tmp/kg-log.jsonl")
+s.AddNode("Alice", []string{"Person"}, nil)  // 1 行を append
+s.AddEdge("Alice", "knows", "Bob", nil)
+_ = s.G  // 読み取りは生 Graph を直接触る
 ```
 
-## データの保存場所
+## データの保存場所と永続化方式
 
-JSON ファイル 1 つに永続化する。
+JSONL（1 行 1 オペレーション）の **append-only log** に永続化する。
+1 ノード追加 = 1 行 append + 1 fsync で済むので、ファイルが大きくなっても書き込みコストは一定。
 
 | 環境変数 | 既定値 |
 |---|---|
-| `KG_DATA` | `~/.kg/data.json` |
+| `KG_DATA` | `~/.kg/log.jsonl` |
 
-書き込みは一時ファイルへ書いてから `rename(2)` で差し替えるので、途中で落ちても元のファイルは壊れない。
+### ログフォーマット
+
+```jsonl
+{"op":"node","id":"Alice","labels":["Person"],"properties":{"age":"30"}}
+{"op":"edge","from":"Alice","relation":"knows","to":"Bob"}
+{"op":"del-edge","from":"Alice","relation":"knows","to":"Bob"}
+```
+
+各行は独立した JSON オブジェクトなので、`grep` や `jq -c` でそのまま処理できる。
+
+### 読み込み（replay）
+
+CLI 起動時にログを先頭から再生し、メモリ上にグラフを再構築する。
+`add-node X` と書いたあとに `add-node X --prop k=v` と書けば、後者がマージされた最終状態になる。
+
+### コンパクション
+
+削除や上書きが累積するとログが冗長になる。`kg compact` を実行すると、
+現在のメモリ状態から「ノードごとに 1 行、エッジごとに 1 行」の最小スナップショットを書き出して置き換える（tmp + atomic rename）。
+
+```bash
+kg compact
+# => compacted: 1.2MB -> 340KB (28.3% of original)
+```
+
+### 旧 JSON フォーマットからのマイグレーション
+
+`~/.kg/data.json`（旧フォーマット）が残っている状態で `kg` を起動すると、
+自動的に JSONL に変換され、元ファイルは `.bak` 付きで保存される。
+明示的な操作は不要。
 
 ## コマンド一覧
 
@@ -95,11 +133,12 @@ JSON ファイル 1 つに永続化する。
 | `kg neighbors <id> [--direction out\|in\|both]` | ノードに接続するエッジを表示。既定は `both`。 |
 | `kg path <from> <to>` | 2 ノード間の最短パスを無向 BFS で探索。 |
 
-### 入出力
+### 入出力・メンテナンス
 
 | コマンド | 説明 |
 |---|---|
 | `kg export [--format json\|triples]` | 標準出力にダンプ。`triples` はタブ区切りの `S\tP\tO` 形式。 |
+| `kg compact` | JSONL ログから不要な履歴を畳んで最小スナップショットに書き直す。 |
 | `kg help` | ヘルプ表示。 |
 
 ## 使用例
